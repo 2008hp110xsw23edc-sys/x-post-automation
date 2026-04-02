@@ -1,0 +1,35 @@
+name: X投稿 自動生成
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 毎日5:00 JST（= UTC 20:00）
+  workflow_dispatch:       # 手動実行ボタン（テスト用）
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージインストール
+        run: pip install anthropic
+
+      - name: 投稿を生成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python generate_posts.py
+
+      - name: 生成ファイルをコミット・プッシュ
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Actions"
+          git add posts/
+          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') X投稿案を自動生成"
+          git push
