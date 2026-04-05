@@ -1,25 +1,63 @@
 """
-X投稿 パフォーマンス分析スクリプト
-- X API v2 (tweepy) で直近100件のツイートのメトリクスを取得
-- public_metrics: インプレッション・いいね・RT・返信・ブックマーク
-- non_public_metrics: URLクリック・プロフィールクリック（OAuth 1.0a必須）
-- Claude API でパターン分析・改善提案を生成
-- analytics/YYYY-MM-DD.md に保存
+X投稿 週次パフォーマンス分析 + 分析結果を反映した投稿自動生成
+
+フロー:
+  1. X API v2 で直近7日間のツイートのメトリクスを取得
+  2. 指標ごとにランキング集計
+  3. Claude AI でパターン分析・改善提案を生成
+  4. 分析レポートを 分析/YYYY-MM-DD.md に保存
+  5. 分析結果を反映した投稿案6セットを posts/YYYY-MM-DD-analyzed.md に保存
 """
 
 import anthropic
 import tweepy
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 # ──────────────────────────────────────────
-# X API クライアント初期化
+# ガイドライン（CLAUDE(X).md の内容）
+# ──────────────────────────────────────────
+
+GUIDE = """
+## 発信者プロフィール
+- 30代男性、3歳の娘持ち、平凡なサラリーマン
+- 根回し・自己アピールが苦手で寡黙にコツコツこなすタイプ
+- 同期が出世していくのにもやもやしている
+- 月200万円の副業収入を目指し、45歳脱サラが目標
+- 毎日のストレス・人間関係を我慢しながら生きるのをやめたい
+
+## ターゲット読者
+- 職場での根回し・アピールが苦手で悩んでいるサラリーマン
+- 真面目にやっているのに評価されないと感じている人
+- 副業・収益化に興味があるが何から始めればいいかわからない人
+- サラリーマン生活に限界を感じて脱出口を探している人
+- 人生に疲れている・悩んでいる人
+
+## コンテンツのアプローチ・トーン
+- 親しみやすく、やさしい語り口。ですます調
+- 「華やかな成功者」ではなく「同じ悩みを持つ等身大の先行者」として発信
+- 生成文の最後には必ず前向きなコメントを入れる
+- 上から目線・成功自慢・マウント的な表現はしない
+
+## 投稿フォーマット
+- ツリー形式（2投稿セット）
+- 1投稿目：ネガティブな内容（悩み・現実・葛藤）＋最後に「続きは↓」
+- 2投稿目：ポジティブな内容（気づき・転換・行動）＋まとめのひと言
+- 箇条書き・改行を多用しスマホで読みやすく
+- 絵文字を1投稿2〜4個使う
+- 1投稿は140字以内
+- キャッチーでフックのある書き出し
+- ハッシュタグなし
+"""
+
+
+# ──────────────────────────────────────────
+# X API クライアント
 # ──────────────────────────────────────────
 
 def get_x_client() -> tweepy.Client:
-    """OAuth 1.0a ユーザーコンテキストで接続（non_public_metrics 取得に必要）"""
     return tweepy.Client(
         consumer_key=os.environ["X_API_KEY"],
         consumer_secret=os.environ["X_API_SECRET"],
@@ -30,61 +68,56 @@ def get_x_client() -> tweepy.Client:
 
 
 # ──────────────────────────────────────────
-# ツイート・メトリクス取得
+# ツイート取得（直近7日間）
 # ──────────────────────────────────────────
 
-def fetch_tweets(client: tweepy.Client, max_results: int = 100) -> list:
-    """認証ユーザー自身の直近ツイートをメトリクス付きで取得"""
-    # GET /2/users/me — 認証済みユーザー自身の情報を取得（Free/Basicプラン両対応）
+def fetch_tweets_last_7days(client: tweepy.Client) -> list:
+    """認証ユーザーの直近7日間のツイートをメトリクス付きで取得"""
     try:
         me_resp = client.get_me(user_auth=True)
     except tweepy.errors.Forbidden as e:
         raise SystemExit(
             "\n[エラー] X API 403 Forbidden\n"
-            "考えられる原因と対処法:\n"
-            "  1. developer.twitter.com > アプリ設定 > 'User authentication settings' で\n"
-            "     OAuth 1.0a を有効化し、App permissions を 'Read' に設定してください\n"
-            "  2. 設定変更後はアクセストークンを再生成し、GitHubシークレットを更新してください\n"
-            "  3. X API が Basic プラン以上であることを確認してください\n"
+            "対処法:\n"
+            "  developer.twitter.com > アプリ > User authentication settings で\n"
+            "  OAuth 1.0a を有効化・App permissions を Read に設定し、\n"
+            "  アクセストークンを再生成してGitHubシークレットを更新してください\n"
             f"  詳細: {e}"
         ) from e
     except tweepy.errors.Unauthorized as e:
         raise SystemExit(
             "\n[エラー] X API 401 Unauthorized\n"
-            "APIキーまたはアクセストークンが正しくない可能性があります。\n"
-            "GitHubシークレット (X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET) を確認してください。\n"
+            "GitHubシークレット (X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_TOKEN_SECRET) を確認してください\n"
             f"  詳細: {e}"
         ) from e
 
-    if not me_resp.data:
-        raise ValueError("認証ユーザー情報が取得できませんでした")
     user_id = me_resp.data.id
     print(f"      → ユーザーID: {user_id}")
 
-    # ツイート取得（non_public_metrics/organic_metrics は自分のツイートのみ取得可能）
+    start_time = datetime.now(timezone.utc) - timedelta(days=7)
     tweet_fields = [
-        "created_at",
-        "text",
-        "public_metrics",
-        "non_public_metrics",
-        "organic_metrics",
+        "created_at", "text",
+        "public_metrics", "non_public_metrics", "organic_metrics",
     ]
+
     try:
         resp = client.get_users_tweets(
             id=user_id,
-            max_results=min(max_results, 100),
+            max_results=100,
+            start_time=start_time,
             tweet_fields=tweet_fields,
             user_auth=True,
         )
     except tweepy.errors.Forbidden:
-        # non_public_metrics が取得できない場合は public_metrics のみで再試行
         print("      [INFO] non_public_metrics は取得不可。public_metrics のみで取得します")
         resp = client.get_users_tweets(
             id=user_id,
-            max_results=min(max_results, 100),
+            max_results=100,
+            start_time=start_time,
             tweet_fields=["created_at", "text", "public_metrics"],
             user_auth=True,
         )
+
     return resp.data or []
 
 
@@ -93,42 +126,35 @@ def fetch_tweets(client: tweepy.Client, max_results: int = 100) -> list:
 # ──────────────────────────────────────────
 
 def extract_metrics(tweet) -> dict:
-    """ツイートオブジェクトからメトリクスを抽出"""
-    pm = tweet.public_metrics   or {}
-    nm = tweet.non_public_metrics or {}
-    om = tweet.organic_metrics  or {}
+    pm = tweet.public_metrics      or {}
+    nm = tweet.non_public_metrics  or {}
+    om = tweet.organic_metrics     or {}
 
-    # impressionはorganic > public の順で取得
-    impressions = (
-        (om.get("impression_count") if om else None)
-        or (pm.get("impression_count") if pm else None)
-        or 0
-    )
+    impressions = (om.get("impression_count") or pm.get("impression_count") or 0)
+    likes       = (om.get("like_count")    or pm.get("like_count")    or 0)
+    retweets    = (om.get("retweet_count") or pm.get("retweet_count") or 0)
+    replies     = (om.get("reply_count")   or pm.get("reply_count")   or 0)
+    quotes      = (om.get("quote_count")   or pm.get("quote_count")   or 0)
+    bookmarks   = pm.get("bookmark_count") or 0
+    url_clicks      = (nm.get("url_link_clicks")     or om.get("url_link_clicks")     or 0)
+    profile_clicks  = (nm.get("user_profile_clicks") or om.get("user_profile_clicks") or 0)
 
-    likes     = (om.get("like_count")    if om else None) or (pm.get("like_count")    if pm else None) or 0
-    retweets  = (om.get("retweet_count") if om else None) or (pm.get("retweet_count") if pm else None) or 0
-    replies   = (om.get("reply_count")   if om else None) or (pm.get("reply_count")   if pm else None) or 0
-    quotes    = (om.get("quote_count")   if om else None) or (pm.get("quote_count")   if pm else None) or 0
-    bookmarks = (pm.get("bookmark_count") if pm else None) or 0
-    url_clicks     = (nm.get("url_link_clicks")     if nm else None) or (om.get("url_link_clicks")     if om else None) or 0
-    profile_clicks = (nm.get("user_profile_clicks") if nm else None) or (om.get("user_profile_clicks") if om else None) or 0
-
-    total_engagements = likes + retweets + replies + quotes + bookmarks
-    engagement_rate = round(total_engagements / impressions * 100, 2) if impressions > 0 else 0.0
+    total_eng = likes + retweets + replies + quotes + bookmarks
+    eng_rate  = round(total_eng / impressions * 100, 2) if impressions > 0 else 0.0
 
     return {
-        "id":              str(tweet.id),
-        "created_at":      tweet.created_at.strftime("%Y-%m-%d %H:%M") if tweet.created_at else "",
-        "text":            tweet.text or "",
-        "impressions":     impressions,
-        "likes":           likes,
-        "retweets":        retweets,
-        "replies":         replies,
-        "quotes":          quotes,
-        "bookmarks":       bookmarks,
-        "url_clicks":      url_clicks,
-        "profile_clicks":  profile_clicks,
-        "engagement_rate": engagement_rate,
+        "id":             str(tweet.id),
+        "created_at":     tweet.created_at.strftime("%Y-%m-%d %H:%M") if tweet.created_at else "",
+        "text":           tweet.text or "",
+        "impressions":    impressions,
+        "likes":          likes,
+        "retweets":       retweets,
+        "replies":        replies,
+        "quotes":         quotes,
+        "bookmarks":      bookmarks,
+        "url_clicks":     url_clicks,
+        "profile_clicks": profile_clicks,
+        "engagement_rate": eng_rate,
     }
 
 
@@ -138,7 +164,7 @@ def build_metrics_table(tweets: list) -> list[dict]:
         try:
             rows.append(extract_metrics(tweet))
         except Exception as e:
-            print(f"      [WARN] ツイートID {tweet.id} のメトリクス取得に失敗: {e}")
+            print(f"      [WARN] ツイートID {tweet.id}: {e}")
     return rows
 
 
@@ -147,72 +173,94 @@ def top_n(rows: list[dict], key: str, n: int = 5) -> list[dict]:
 
 
 # ──────────────────────────────────────────
-# Claude による AI 分析
+# Claude: パターン分析
 # ──────────────────────────────────────────
 
-def analyze_with_claude(metrics_table: list[dict]) -> str:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-    top_impressions  = top_n(metrics_table, "impressions",    10)
-    top_engagement   = top_n(metrics_table, "engagement_rate", 10)
-    top_url_clicks   = top_n(metrics_table, "url_clicks",      10)
-
-    # Claude に渡すデータ（テキストを短縮）
+def analyze_with_claude(metrics_table: list[dict], client: anthropic.Anthropic) -> str:
     def shorten(rows):
-        return [
-            {**r, "text": r["text"][:100].replace("\n", " ")}
-            for r in rows
-        ]
+        return [{**r, "text": r["text"][:100].replace("\n", " ")} for r in rows]
 
     summary = {
-        "top_impressions":  shorten(top_impressions),
-        "top_engagement":   shorten(top_engagement),
-        "top_url_clicks":   shorten(top_url_clicks),
+        "top_impressions":   shorten(top_n(metrics_table, "impressions",    10)),
+        "top_engagement":    shorten(top_n(metrics_table, "engagement_rate", 10)),
+        "top_url_clicks":    shorten(top_n(metrics_table, "url_clicks",      10)),
+        "top_bookmarks":     shorten(top_n(metrics_table, "bookmarks",       10)),
     }
 
     prompt = f"""
 あなたはXアカウント（@JUN1007S）の投稿アナリストです。
-以下は直近のツイートのパフォーマンスデータです（上位10件ずつ）。
+以下は直近7日間のツイートのパフォーマンスデータです。
 
-このアカウントのプロフィール：
+アカウントプロフィール：
 - 30代男性・3歳娘持ちのサラリーマン
-- 根回し・自己アピールが苦手な「コツコツ型」副業挑戦者
-- 45歳脱サラ・月200万円を目標に、X発信+note販売中
-- ターゲット：正当評価されないサラリーマン、副業に興味ある人
+- 根回し・アピールが苦手な「コツコツ型」副業挑戦者
+- 45歳脱サラ・月200万円目標 / X発信+note販売中
 
 データ：
 {json.dumps(summary, ensure_ascii=False, indent=2)}
 
-以下の観点で日本語で分析してください（合計600〜800字程度）：
+以下の観点で日本語で分析してください（600〜800字）：
 
 ### 1. インプレッションが多い投稿の共通パターン
-（書き出し・テーマ・構成・時間帯など）
-
 ### 2. エンゲージメント率が高い投稿の特徴
-（読者の反応を引き出す要素）
-
-### 3. URLクリックが多い投稿の特徴
-（note誘導に効果的なパターン）
-
-### 4. 今後の投稿改善アドバイス（3〜5点）
-（明日から実践できる具体的な内容）
-
+### 3. URLクリック（note誘導）に効果的なパターン
+### 4. 今後の投稿改善アドバイス（具体的に3〜5点）
 ### 5. 避けるべきパターン
-（パフォーマンスが低い投稿の特徴）
 
-分析は箇条書きと見出しを使い、具体的なアドバイスにしてください。
+箇条書きと見出しを使い、明日から実践できる具体的な内容にしてください。
 """
-
-    message = client.messages.create(
+    msg = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
-    return message.content[0].text
+    return msg.content[0].text
 
 
 # ──────────────────────────────────────────
-# レポート生成・保存
+# Claude: 分析結果を反映した投稿生成
+# ──────────────────────────────────────────
+
+def generate_posts_with_insights(analysis: str, client: anthropic.Anthropic) -> str:
+    prompt = f"""
+以下のガイドラインと今週の分析結果を踏まえて、X（Twitter）投稿を生成してください。
+
+{GUIDE}
+
+【今週の分析結果・改善ポイント】
+{analysis}
+
+上記の分析から得た「バズりやすいパターン」「エンゲージメントが高い書き方」を意識しながら、
+以下の3タイプをそれぞれ2セット、合計6セット生成してください。
+
+【共感型】×2セット：読者の悩みや感情を言語化する
+【ストーリー型】×2セット：自分の経験・進捗・葛藤をリアルに語る
+【問いかけ型】×2セット：読者に「自分ごと」として考えさせる
+
+出力形式：
+---
+## 共感型 セット1
+
+【1投稿目】
+（本文）
+
+【2投稿目】
+（本文）
+
+---
+## 共感型 セット2
+...（以下同様）
+"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text
+
+
+# ──────────────────────────────────────────
+# レポート生成
 # ──────────────────────────────────────────
 
 def format_tweet_card(rank: int, row: dict) -> str:
@@ -224,28 +272,27 @@ def format_tweet_card(rank: int, row: dict) -> str:
         f"> {preview}\n"
         f"- インプレッション: {row['impressions']:,} ／ エンゲージメント率: {row['engagement_rate']}%\n"
         f"- いいね: {row['likes']:,}　RT: {row['retweets']:,}　返信: {row['replies']:,}　引用: {row['quotes']:,}\n"
-        f"- ブックマーク: {row['bookmarks']:,}　URLクリック: {row['url_clicks']:,}　プロフクリック: {row['profile_clicks']:,}\n"
+        f"- ブックマーク: {row['bookmarks']:,}　URLクリック: {row['url_clicks']:,}\n"
     )
 
 
-def generate_report(metrics_table: list[dict], ai_analysis: str) -> str:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    total = len(metrics_table)
-
-    avg_imp = sum(r["impressions"]    for r in metrics_table) / total if total else 0
-    avg_eng = sum(r["engagement_rate"] for r in metrics_table) / total if total else 0
-    total_clicks = sum(r["url_clicks"] for r in metrics_table)
+def generate_report(metrics_table: list[dict], analysis: str, period_start: str, period_end: str) -> str:
+    total     = len(metrics_table)
+    avg_imp   = sum(r["impressions"]     for r in metrics_table) / total if total else 0
+    avg_eng   = sum(r["engagement_rate"] for r in metrics_table) / total if total else 0
+    total_url = sum(r["url_clicks"]      for r in metrics_table)
 
     lines = [
-        f"# X投稿 パフォーマンス分析レポート ({today})",
+        f"# X投稿 週次パフォーマンス分析レポート",
+        f"**集計期間**: {period_start} 〜 {period_end}",
         "",
-        "## 概要",
-        f"| 指標 | 値 |",
-        f"|---|---|",
+        "## サマリー",
+        "| 指標 | 値 |",
+        "|---|---|",
         f"| 分析ツイート数 | {total}件 |",
         f"| 平均インプレッション | {avg_imp:,.0f} |",
         f"| 平均エンゲージメント率 | {avg_eng:.2f}% |",
-        f"| URLクリック合計 | {total_clicks:,} |",
+        f"| URLクリック合計 | {total_url:,} |",
         "",
         "---",
         "",
@@ -263,7 +310,7 @@ def generate_report(metrics_table: list[dict], ai_analysis: str) -> str:
     for i, row in enumerate(top_n(metrics_table, "url_clicks"), 1):
         lines.append(format_tweet_card(i, row))
 
-    lines += ["---", "", "## ブックマーク TOP5（保存価値の高い投稿）", ""]
+    lines += ["---", "", "## ブックマーク TOP5", ""]
     for i, row in enumerate(top_n(metrics_table, "bookmarks"), 1):
         lines.append(format_tweet_card(i, row))
 
@@ -272,7 +319,7 @@ def generate_report(metrics_table: list[dict], ai_analysis: str) -> str:
         "",
         "## AI分析・改善提案",
         "",
-        ai_analysis,
+        analysis,
         "",
         "---",
         f"*生成日時: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*",
@@ -285,32 +332,51 @@ def generate_report(metrics_table: list[dict], ai_analysis: str) -> str:
 # ──────────────────────────────────────────
 
 def main():
-    username = "JUN1007S"
+    today      = datetime.now(timezone.utc)
+    week_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_end   = today.strftime("%Y-%m-%d")
+    date_str   = today.strftime("%Y-%m-%d")
 
-    print(f"[1/5] X APIクライアント初期化")
-    client = get_x_client()
+    print("[1/6] X APIクライアント初期化")
+    x_client = get_x_client()
 
-    print(f"[2/5] ツイート取得中: @{username}（最大100件）")
-    tweets = fetch_tweets(client)
+    print(f"[2/6] 直近7日間のツイート取得中（{week_start} 〜 {week_end}）")
+    tweets = fetch_tweets_last_7days(x_client)
     print(f"      → {len(tweets)}件取得")
 
-    print("[3/5] メトリクス集計中...")
+    if not tweets:
+        print("      [INFO] 対象ツイートが0件のため終了します")
+        return
+
+    print("[3/6] メトリクス集計中...")
     metrics_table = build_metrics_table(tweets)
-    print(f"      → {len(metrics_table)}件集計完了")
 
-    print("[4/5] Claude AIで分析中...")
-    ai_analysis = analyze_with_claude(metrics_table)
+    print("[4/6] Claude AIでパターン分析中...")
+    claude_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    analysis = analyze_with_claude(metrics_table, claude_client)
 
-    print("[5/5] レポート保存中...")
-    report = generate_report(metrics_table, ai_analysis)
-
-    os.makedirs("analytics", exist_ok=True)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    filepath = f"analytics/{today}.md"
-    with open(filepath, "w", encoding="utf-8") as f:
+    print("[5/6] 分析レポート保存中...")
+    report = generate_report(metrics_table, analysis, week_start, week_end)
+    os.makedirs("分析", exist_ok=True)
+    report_path = f"分析/{date_str}.md"
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
+    print(f"      → {report_path}")
 
-    print(f"\n完了: {filepath}")
+    print("[6/6] 分析結果を反映した投稿案を生成中...")
+    posts = generate_posts_with_insights(analysis, claude_client)
+    os.makedirs("posts", exist_ok=True)
+    posts_path = f"posts/{date_str}-analyzed.md"
+    with open(posts_path, "w", encoding="utf-8") as f:
+        f.write(f"# X投稿案（分析結果反映版） {date_str}\n\n")
+        f.write("> 今週のパフォーマンス分析を踏まえて生成した投稿案です。\n")
+        f.write(f"> 分析レポート: [分析/{date_str}.md](../分析/{date_str}.md)\n\n")
+        f.write(posts)
+    print(f"      → {posts_path}")
+
+    print(f"\n完了！")
+    print(f"  分析レポート : {report_path}")
+    print(f"  投稿案       : {posts_path}")
 
 
 if __name__ == "__main__":

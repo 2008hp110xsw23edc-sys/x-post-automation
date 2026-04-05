@@ -2,7 +2,7 @@ name: X投稿 週次パフォーマンス分析
 
 on:
   schedule:
-    - cron: '0 21 * * 0'  # 毎週月曜 6:00 JST（= 日曜 UTC 21:00）
+    - cron: '0 20 * * 5'  # 毎週土曜 5:00 JST（= 金曜 UTC 20:00）
   workflow_dispatch:       # 手動実行ボタン（テスト用）
 
 jobs:
@@ -25,19 +25,19 @@ jobs:
       - name: 依存パッケージインストール
         run: pip install anthropic tweepy
 
-      - name: 投稿パフォーマンスを分析
+      - name: 投稿パフォーマンスを分析・投稿案を生成
         env:
-          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
-          X_API_KEY:              ${{ secrets.X_API_KEY }}
-          X_API_SECRET:           ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN:         ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET:  ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY:               ${{ secrets.X_API_KEY }}
+          X_API_SECRET:            ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:          ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET:   ${{ secrets.X_ACCESS_TOKEN_SECRET }}
         run: python analyze_posts.py
 
-      - name: 分析レポートをコミット・プッシュ
+      - name: 分析レポート・投稿案をコミット・プッシュ
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Actions"
-          git add analytics/
-          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') X投稿パフォーマンス分析レポートを生成"
+          git add 分析/ posts/
+          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') 週次分析レポートと分析反映投稿案を生成"
           git push
