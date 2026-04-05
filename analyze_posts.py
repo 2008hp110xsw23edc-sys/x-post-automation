@@ -35,8 +35,8 @@ def get_x_client() -> tweepy.Client:
 
 def fetch_tweets(client: tweepy.Client, username: str, max_results: int = 100) -> list:
     """ユーザーの直近ツイートをメトリクス付きで取得"""
-    # ユーザーID取得
-    user_resp = client.get_user(username=username)
+    # ユーザーID取得（OAuth 1.0a ユーザー認証を強制）
+    user_resp = client.get_user(username=username, user_auth=True)
     if not user_resp.data:
         raise ValueError(f"ユーザー @{username} が見つかりません")
     user_id = user_resp.data.id
@@ -54,6 +54,7 @@ def fetch_tweets(client: tweepy.Client, username: str, max_results: int = 100) -
         id=user_id,
         max_results=min(max_results, 100),
         tweet_fields=tweet_fields,
+        user_auth=True,
     )
     return resp.data or []
 
