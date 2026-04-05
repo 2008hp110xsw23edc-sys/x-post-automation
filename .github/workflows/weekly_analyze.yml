@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: 依存パッケージインストール
-        run: pip install anthropic
+        run: pip install anthropic tweepy
 
       - name: 投稿パフォーマンスを分析
         env:
