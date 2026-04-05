@@ -40,4 +40,4 @@ jobs:
           git config --local user.name "GitHub Actions"
           git add 分析/ posts/
           git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') 週次分析レポートと分析反映投稿案を生成"
-          git push
+          git pull --rebase && git push
