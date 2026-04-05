@@ -33,16 +33,35 @@ def get_x_client() -> tweepy.Client:
 # ツイート・メトリクス取得
 # ──────────────────────────────────────────
 
-def fetch_tweets(client: tweepy.Client, username: str, max_results: int = 100) -> list:
-    """ユーザーの直近ツイートをメトリクス付きで取得"""
-    # ユーザーID取得（OAuth 1.0a ユーザー認証を強制）
-    user_resp = client.get_user(username=username, user_auth=True)
-    if not user_resp.data:
-        raise ValueError(f"ユーザー @{username} が見つかりません")
-    user_id = user_resp.data.id
+def fetch_tweets(client: tweepy.Client, max_results: int = 100) -> list:
+    """認証ユーザー自身の直近ツイートをメトリクス付きで取得"""
+    # GET /2/users/me — 認証済みユーザー自身の情報を取得（Free/Basicプラン両対応）
+    try:
+        me_resp = client.get_me(user_auth=True)
+    except tweepy.errors.Forbidden as e:
+        raise SystemExit(
+            "\n[エラー] X API 403 Forbidden\n"
+            "考えられる原因と対処法:\n"
+            "  1. developer.twitter.com > アプリ設定 > 'User authentication settings' で\n"
+            "     OAuth 1.0a を有効化し、App permissions を 'Read' に設定してください\n"
+            "  2. 設定変更後はアクセストークンを再生成し、GitHubシークレットを更新してください\n"
+            "  3. X API が Basic プラン以上であることを確認してください\n"
+            f"  詳細: {e}"
+        ) from e
+    except tweepy.errors.Unauthorized as e:
+        raise SystemExit(
+            "\n[エラー] X API 401 Unauthorized\n"
+            "APIキーまたはアクセストークンが正しくない可能性があります。\n"
+            "GitHubシークレット (X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET) を確認してください。\n"
+            f"  詳細: {e}"
+        ) from e
+
+    if not me_resp.data:
+        raise ValueError("認証ユーザー情報が取得できませんでした")
+    user_id = me_resp.data.id
     print(f"      → ユーザーID: {user_id}")
 
-    # ツイート取得（non_public_metrics は自分のツイートのみ取得可能）
+    # ツイート取得（non_public_metrics/organic_metrics は自分のツイートのみ取得可能）
     tweet_fields = [
         "created_at",
         "text",
@@ -50,12 +69,22 @@ def fetch_tweets(client: tweepy.Client, username: str, max_results: int = 100) -
         "non_public_metrics",
         "organic_metrics",
     ]
-    resp = client.get_users_tweets(
-        id=user_id,
-        max_results=min(max_results, 100),
-        tweet_fields=tweet_fields,
-        user_auth=True,
-    )
+    try:
+        resp = client.get_users_tweets(
+            id=user_id,
+            max_results=min(max_results, 100),
+            tweet_fields=tweet_fields,
+            user_auth=True,
+        )
+    except tweepy.errors.Forbidden:
+        # non_public_metrics が取得できない場合は public_metrics のみで再試行
+        print("      [INFO] non_public_metrics は取得不可。public_metrics のみで取得します")
+        resp = client.get_users_tweets(
+            id=user_id,
+            max_results=min(max_results, 100),
+            tweet_fields=["created_at", "text", "public_metrics"],
+            user_auth=True,
+        )
     return resp.data or []
 
 
@@ -262,7 +291,7 @@ def main():
     client = get_x_client()
 
     print(f"[2/5] ツイート取得中: @{username}（最大100件）")
-    tweets = fetch_tweets(client, username)
+    tweets = fetch_tweets(client)
     print(f"      → {len(tweets)}件取得")
 
     print("[3/5] メトリクス集計中...")
