@@ -1,0 +1,43 @@
+name: X投稿 週次パフォーマンス分析
+
+on:
+  schedule:
+    - cron: '0 21 * * 0'  # 毎週月曜 6:00 JST（= 日曜 UTC 21:00）
+  workflow_dispatch:       # 手動実行ボタン（テスト用）
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージインストール
+        run: pip install anthropic
+
+      - name: 投稿パフォーマンスを分析
+        env:
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY:              ${{ secrets.X_API_KEY }}
+          X_API_SECRET:           ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:         ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET:  ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+        run: python analyze_posts.py
+
+      - name: 分析レポートをコミット・プッシュ
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Actions"
+          git add analytics/
+          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') X投稿パフォーマンス分析レポートを生成"
+          git push
