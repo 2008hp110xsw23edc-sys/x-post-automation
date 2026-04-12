@@ -1,8 +1,8 @@
-name: X投稿 自動生成
+name: X投稿 自動生成（参考アカウント分析反映）
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 毎日5:00 JST（= UTC 20:00）
+    - cron: '0 20 * * *'  # 毎日 5:00 JST（= UTC 20:00）
   workflow_dispatch:       # 手動実行ボタン（テスト用）
 
 jobs:
@@ -23,9 +23,16 @@ jobs:
           python-version: '3.11'
 
       - name: 依存パッケージインストール
-        run: pip install anthropic
+        run: pip install anthropic tweepy requests
 
-      - name: 投稿を生成
+      - name: 参考アカウントの投稿を分析
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY:         ${{ secrets.X_API_KEY }}
+          X_API_SECRET:      ${{ secrets.X_API_SECRET }}
+        run: python analyze_reference_accounts.py
+
+      - name: 分析インサイントを反映して投稿案を生成
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python generate_posts.py
@@ -34,6 +41,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Actions"
-          git add posts/
-          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') X投稿案を自動生成"
+          git add posts/ 分析/
+          git diff --staged --quiet || git commit -m "$(date +'%Y-%m-%d') X投稿案を自動生成（参考アカウント分析反映）"
           git pull --rebase && git push
