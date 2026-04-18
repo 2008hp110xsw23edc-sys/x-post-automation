@@ -274,32 +274,56 @@ JSONのみを出力してください。余分な説明不要。
 
     insights_msg = claude_client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1000,
+        max_tokens=1500,
+        system="あなたはJSONのみを出力するアシスタントです。説明文・前置き・コードブロック記号は一切不要です。JSONオブジェクトだけを出力してください。",
         messages=[{"role": "user", "content": insights_prompt}],
     )
-    insights_text = insights_msg.content[0].text.strip()
+    raw_response = insights_msg.content[0].text.strip()
+    print(f"      [DEBUG] インサイントJSON応答（先頭200字）: {raw_response[:200]}")
 
-    # JSON部分を抽出（コードブロックがある場合）
-    if "```" in insights_text:
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", insights_text)
-        if match:
-            insights_text = match.group(1).strip()
-
-    try:
-        insights = json.loads(insights_text)
-    except json.JSONDecodeError:
-        print("      [WARN] インサイントJSONのパースに失敗。デフォルト値を使用します")
-        insights = {
-            "analyzed_at":            datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "accounts":               [acc["username"] for acc in accounts_data],
-            "top_hooks":              [],
-            "top_themes":             [],
-            "style_tips":             [],
-            "immediate_improvements": [],
-            "summary":                "参考アカウントの分析データを取得しました",
-        }
-
+    insights = _parse_insights_json(raw_response, accounts_data)
     return analysis_text, insights
+
+
+def _parse_insights_json(raw: str, accounts_data: list) -> dict:
+    """
+    Claude のレスポンスから JSON を堅牢に抽出する。
+    コードブロック・余分なテキスト・改行ズレに対応。
+    """
+    candidates = []
+
+    # 1. コードブロック内を試す
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    if m:
+        candidates.append(m.group(1).strip())
+
+    # 2. 最外の { } ブロックを試す
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        candidates.append(m.group(0).strip())
+
+    # 3. そのまま試す
+    candidates.append(raw)
+
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+            print("      [OK] インサイントJSON のパースに成功しました")
+            return result
+        except json.JSONDecodeError:
+            continue
+
+    # すべて失敗 → フォールバック（デバッグ用に生レスポンスを保存）
+    print(f"      [WARN] JSON パース失敗。生レスポンス:\n{raw[:500]}")
+    return {
+        "analyzed_at":            datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "accounts":               [acc["username"] for acc in accounts_data],
+        "top_hooks":              [],
+        "top_themes":             [],
+        "style_tips":             [],
+        "immediate_improvements": [],
+        "summary":                "参考アカウントの分析データを取得しました（JSONパース失敗）",
+    }
 
 
 # ──────────────────────────────────────────
