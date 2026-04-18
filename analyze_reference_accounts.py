@@ -261,7 +261,7 @@ def analyze_with_claude(
 
 {{
   "analyzed_at": "{datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
-  "accounts": ["SureGoahead", "yama_hsshsp", "sho30_hsshsp"],
+  "accounts": {json.dumps([acc["username"] for acc in accounts_data], ensure_ascii=False)},
   "top_hooks": ["冒頭フックのパターン1", "パターン2", "パターン3"],
   "top_themes": ["効果的なテーマ1", "テーマ2", "テーマ3"],
   "style_tips": ["文体・スタイルのコツ1", "コツ2", "コツ3"],

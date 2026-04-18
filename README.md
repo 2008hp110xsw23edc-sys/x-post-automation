@@ -3,14 +3,14 @@
 ## 全体フロー
 
 ```
-【毎日 5:00 JST】
+【毎日 2:00 JST】
 ① analyze_reference_accounts.py
-   参考アカウント（@SureGoahead/@yama_hsshsp/@sho30_hsshsp）の
-   高エンゲージメント投稿を分析 → 分析/reference-insights-latest.json に保存
+   参考アカウント（"C:\Users\User\OneDrive\デスクトップ\note\参考アカウント.txt"）の
+   直近30日間の高エンゲージメント投稿を分析 → 分析/reference-insights-latest.json に保存
 
 ② generate_posts.py
    ガイドライン + 参考アカウント分析インサイントを反映して
-   6タイプ × 2投稿 = 計12投稿を生成 → posts/YYYY-MM-DD.md に保存
+   6投稿を生成 → posts/YYYY-MM-DD.md に保存
 
 ③ GitHub にコミット・プッシュ
    → 確認・修正 → X に投稿
@@ -42,16 +42,16 @@ analyze_posts.py
 
 ### 2. 投稿自動生成（`generate_posts.py`）
 
-参考アカウント分析インサイントを反映し、**6タイプ × 2投稿 = 計12投稿**を生成します。
+参考アカウントの直近30日間の高エンゲージメント投稿を分析し、その結果をベースに計6投稿を生成します。
 
-| タイプ | 内容 | 投稿数 |
-|---|---|---|
-| 問題提起型 | 職場HSPが詰む「構造的な理由」を本質からえぐる | 2 |
-| あるある型 | 職場HSPが「これ私だ！」と感じる共感コンテンツ | 2 |
-| 本音告白型 | 職場での実体験・理不尽を正直に語り共感と怒りを引き出す | 2 |
-| マヒサイン型 | 職場で心が限界に近づいているサインを可視化する | 2 |
-| 逆説気づき型 | 「停滞・消耗・失敗」を「糧・次への一歩」に変換する視点を届ける | 2 |
-| 解決策型 | テーマ別の具体的解決策を「明日からできる」レベルで提示する | 2 |
+| 生成の基準 | 内容 |
+|---|---|
+| バズる冒頭フック | 分析で判明した反応を集める冒頭パターンを最優先で採用 |
+| 効果的なテーマ・切り口 | エンゲージメントが高かったテーマを選ぶ |
+| 文体・構成 | 分析で見えた改行・絵文字・文字数のコツを踏襲 |
+| 即日改善ポイント | 分析の「★ 即日反映すべきポイント」を必ず取り入れる |
+
+投稿タイプ・テーマ・構成はすべて参考アカウントの分析から導きます（固定タイプ表は使いません）。
 
 ### 3. 週次パフォーマンス分析（`analyze_posts.py`）
 
@@ -84,9 +84,9 @@ gh secret set X_ACCESS_TOKEN_SECRET   --body "..."
 `参考アカウント.txt` を編集してください（1行1アカウント、@付き可）。
 
 ```
-@SureGoahead
-@yama_hsshsp
-@sho30_hsshsp
+@Influencer侍
+@paya_paya_kun
+@IObousan
 ```
 
 ---
@@ -95,7 +95,7 @@ gh secret set X_ACCESS_TOKEN_SECRET   --body "..."
 
 ```
 x-post-automation/
-├── generate_posts.py                    # 投稿自動生成（6タイプ×2投稿）
+├── generate_posts.py                    # 投稿自動生成（6タイプ×1投稿=6投稿）
 ├── analyze_reference_accounts.py        # 参考アカウント分析
 ├── analyze_posts.py                     # 自アカウント週次分析
 ├── analyze_account.py                   # 任意アカウント個別分析（手動）
@@ -103,14 +103,14 @@ x-post-automation/
 ├── 参考アカウント.txt                   # 分析対象の参考アカウント一覧
 ├── CLAUDE（X）.md                       # 投稿生成ガイドライン
 ├── posts/
-│   ├── YYYY-MM-DD.md                   # 毎日生成の投稿案（12投稿）
+│   ├── YYYY-MM-DD.md                   # 毎日生成の投稿案（6投稿）
 │   └── YYYY-MM-DD-analyzed.md          # 週次分析反映の投稿案
 ├── 分析/
 │   ├── reference-accounts-YYYY-MM-DD.md # 参考アカウント詳細分析レポート
 │   ├── reference-insights-latest.json   # 最新インサイントJSON（投稿生成に使用）
 │   └── YYYY-MM-DD.md                   # 自アカウント週次分析レポート
 └── .github/workflows/
-    ├── daily_generate.yml               # 毎日 5:00 JST：参考分析→投稿生成
+    ├── daily_generate.yml               # 毎日 2:00 JST：参考分析→投稿生成
     └── weekly_analyze.yml               # 毎週土曜 5:00 JST：週次分析
 ```
 
@@ -125,5 +125,5 @@ GitHub の **Actions** タブ → 対象ワークフロー → **Run workflow** 
 ## 投稿の使い方
 
 1. `posts/YYYY-MM-DD.md` を GitHub で開く
-2. 12投稿の内容を確認・修正する
+2. 6投稿の内容を確認・修正する
 3. 気に入った投稿を X にコピー＆ペーストして投稿
