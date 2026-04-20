@@ -9,7 +9,7 @@
    直近30日間の高エンゲージメント投稿を分析 → 分析/reference-insights-latest.json に保存
 
 ② generate_posts.py
-   ガイドライン + 参考アカウント分析インサイントを反映して
+   参考アカウント分析インサイントを反映して
    6投稿を生成 → posts/YYYY-MM-DD.md に保存
 
 ③ GitHub にコミット・プッシュ
