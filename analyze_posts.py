@@ -12,6 +12,7 @@ X投稿 週次パフォーマンス分析 + 分析結果を反映した投稿自
 import anthropic
 import tweepy
 import os
+import sys
 import json
 from datetime import datetime, timezone, timedelta
 
@@ -49,6 +50,16 @@ def fetch_tweets_last_7days(client: tweepy.Client) -> list:
     """認証ユーザーの直近7日間のツイートをメトリクス付きで取得"""
     try:
         me_resp = client.get_me(user_auth=True)
+    except tweepy.errors.HTTPException as e:
+        if e.response is not None and e.response.status_code == 402:
+            print(
+                "\n[スキップ] X API 402 Payment Required\n"
+                "X API のクレジットが不足しています。\n"
+                "対処法: developer.twitter.com でプランを確認・クレジットを追加してください\n"
+                f"  詳細: {e}"
+            )
+            sys.exit(0)
+        raise
     except tweepy.errors.Forbidden as e:
         raise SystemExit(
             "\n[エラー] X API 403 Forbidden\n"
@@ -82,6 +93,16 @@ def fetch_tweets_last_7days(client: tweepy.Client) -> list:
             tweet_fields=tweet_fields,
             user_auth=True,
         )
+    except tweepy.errors.HTTPException as e:
+        if e.response is not None and e.response.status_code == 402:
+            print(
+                "\n[スキップ] X API 402 Payment Required\n"
+                "X API のクレジットが不足しています。\n"
+                "対処法: developer.twitter.com でプランを確認・クレジットを追加してください\n"
+                f"  詳細: {e}"
+            )
+            sys.exit(0)
+        raise
     except tweepy.errors.Forbidden:
         print("      [INFO] non_public_metrics は取得不可。public_metrics のみで取得します")
         resp = client.get_users_tweets(
@@ -337,20 +358,23 @@ def main():
 
     print("[5/6] 分析レポート保存中...")
     report = generate_report(metrics_table, analysis, week_start, week_end)
-    os.makedirs("分析", exist_ok=True)
-    report_path = f"分析/{date_str}.md"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    analysis_dir = os.path.join(script_dir, "分析")
+    posts_dir = os.path.join(script_dir, "posts")
+    os.makedirs(analysis_dir, exist_ok=True)
+    report_path = os.path.join(analysis_dir, f"{date_str}.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
     print(f"      → {report_path}")
 
     print("[6/6] 分析結果を反映した投稿案を生成中...")
     posts = generate_posts_with_insights(analysis, claude_client)
-    os.makedirs("posts", exist_ok=True)
-    posts_path = f"posts/{date_str}-analyzed.md"
+    os.makedirs(posts_dir, exist_ok=True)
+    posts_path = os.path.join(posts_dir, f"{date_str}-analyzed.md")
     with open(posts_path, "w", encoding="utf-8") as f:
         f.write(f"# X投稿案（分析結果反映版） {date_str}\n\n")
         f.write("> 今週のパフォーマンス分析を踏まえて生成した投稿案です。\n")
-        f.write(f"> 分析レポート: [分析/{date_str}.md](../分析/{date_str}.md)\n\n")
+        f.write(f"> 分析レポート: [分析/{date_str}.md](分析/{date_str}.md)\n\n")
         f.write(posts)
     print(f"      → {posts_path}")
 

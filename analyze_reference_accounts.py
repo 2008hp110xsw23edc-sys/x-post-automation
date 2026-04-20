@@ -18,6 +18,7 @@ import requests
 import base64
 import os
 import re
+import sys
 import json
 import time
 from datetime import datetime, timezone, timedelta
@@ -80,11 +81,33 @@ def get_user_info(client: tweepy.Client, username: str) -> dict:
             username=username,
             user_fields=["name", "description", "public_metrics", "created_at"],
         )
+    except tweepy.errors.HTTPException as e:
+        if e.response is not None and e.response.status_code == 402:
+            print(
+                "\n[スキップ] X API 402 Payment Required\n"
+                "X API のクレジットが不足しています。\n"
+                "対処法: developer.twitter.com でプランを確認・クレジットを追加してください\n"
+                f"  詳細: {e}"
+            )
+            sys.exit(0)
+        print(f"      [WARN] @{username} の情報取得失敗 (HTTP {e.response.status_code if e.response else '?'}): {e}")
+        return {}
     except tweepy.errors.NotFound:
-        print(f"      [WARN] @{username} が見つかりません")
+        print(f"      [WARN] @{username} が見つかりません（アカウント削除・非公開の可能性）")
+        return {}
+    except tweepy.errors.Forbidden as e:
+        print(f"      [WARN] @{username} へのアクセス拒否 (403): {e}")
+        print("      → X API のプラン・権限を確認してください")
+        return {}
+    except tweepy.errors.Unauthorized as e:
+        print(f"      [WARN] @{username} の認証失敗 (401): {e}")
+        print("      → X_API_KEY / X_API_SECRET を確認してください")
+        return {}
+    except tweepy.errors.TooManyRequests as e:
+        print(f"      [WARN] @{username} のレート制限超過 (429): {e}")
         return {}
     except Exception as e:
-        print(f"      [WARN] @{username} の情報取得失敗: {e}")
+        print(f"      [WARN] @{username} の情報取得失敗 ({type(e).__name__}): {e}")
         return {}
 
     if not resp.data:
@@ -128,6 +151,17 @@ def fetch_user_tweets(
                 exclude=["retweets", "replies"],
                 pagination_token=pagination_token,
             )
+        except tweepy.errors.HTTPException as e:
+            if e.response is not None and e.response.status_code == 402:
+                print(
+                    "\n[スキップ] X API 402 Payment Required\n"
+                    "X API のクレジットが不足しています。\n"
+                    "対処法: developer.twitter.com でプランを確認・クレジットを追加してください\n"
+                    f"  詳細: {e}"
+                )
+                sys.exit(0)
+            print(f"      [WARN] ツイート取得エラー (HTTP {e.response.status_code if e.response else '?'}): {e}")
+            break
         except tweepy.errors.TooManyRequests:
             print("      [INFO] レート制限。取得済みデータで続行します")
             break
@@ -427,8 +461,9 @@ def main():
         time.sleep(1)  # レート制限対策
 
     if not accounts_data:
-        print("      [INFO] データが取得できませんでした。スキップします")
-        return
+        print("      [ERROR] 全アカウントのデータ取得に失敗しました")
+        print("      → X API のレート制限・プラン制限・認証エラーを確認してください")
+        raise SystemExit(1)
 
     print("[4/5] Claude AIで分析中...")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
