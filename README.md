@@ -84,9 +84,10 @@ gh secret set X_ACCESS_TOKEN_SECRET   --body "..."
 `参考アカウント.txt` を編集してください（1行1アカウント、@付き可）。
 
 ```
-@Influencer侍
+@Influen01014380
 @paya_paya_kun
 @IObousan
+@yama_hsshsp
 ```
 
 ---
