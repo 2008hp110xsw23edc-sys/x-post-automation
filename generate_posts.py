@@ -4,7 +4,9 @@ X投稿 自動生成スクリプト（参考アカウント分析ベース）
 フロー:
   1. CLAUDE（X）.md を読み込んでガイドラインを取得
   2. 分析/reference-insights-latest.json があれば参考アカウント分析インサイトを反映
-  3. 参考アカウントの分析をベースに計6投稿を生成（1投稿完結・140字以内）
+  3. 参考アカウントの分析をベースに計9投稿を生成（1投稿完結・140字以内）
+     └ 投稿1〜6：通常分析反映投稿
+     └ 投稿7〜9：前向きな心もち・希望や対策系投稿
   4. posts/YYYY-MM-DD.md に保存
 
 投稿タイプ・テーマ・構成は固定ではなく、参考アカウントの分析から導く。
@@ -17,8 +19,20 @@ from datetime import datetime
 
 
 # ──────────────────────────────────────────
-# ガイドライン・インサイント読み込み
+# ガイドライン・インサイント・アカウント読み込み
 # ──────────────────────────────────────────
+
+def load_reference_accounts() -> list:
+    """参考アカウント.txt を読み込む（@付き可・1行1アカウント）"""
+    accounts_path = os.path.join(os.path.dirname(__file__), "参考アカウント.txt")
+    accounts = []
+    with open(accounts_path, encoding="utf-8") as f:
+        for line in f:
+            name = line.strip()
+            if name:
+                accounts.append(name if name.startswith("@") else f"@{name}")
+    return accounts
+
 
 def load_guide() -> str:
     """CLAUDE（X）.md を読み込む"""
@@ -100,7 +114,9 @@ def main():
         insights_section = ""
 
     prompt = f"""
-以下のガイドラインと参考アカウントの分析インサイトをもとに、X（Twitter）投稿を6本生成してください。
+以下のガイドラインと参考アカウントの分析インサイトをもとに、X（Twitter）投稿を合計9本生成してください。
+・投稿1〜6：通常投稿（分析インサイト反映）
+・投稿7〜9：前向きな心もち・希望や対策系（別ルール適用）
 
 {guide}
 {insights_section}
@@ -109,7 +125,7 @@ def main():
 
 【最重要指示：参考アカウントの分析を投稿に直接反映すること】
 
-分析インサイトが提示されている場合、以下を**必ず**守ってください。
+分析インサイトが提示されている場合、以下を**必ず**守ってください（投稿1〜6に適用）。
 
 1. **冒頭フックは分析で判明したパターンをそのまま使う**
    - 「▼ バズる冒頭フックのパターン」に列挙されたフレーズを6本の冒頭に割り当てる
@@ -129,7 +145,34 @@ def main():
 
 分析インサイントがない場合のみ、ガイドラインの基本ルールに従って生成する。
 
-【共通ルール（必ず守ること）】
+---
+
+【投稿7〜9：前向きな心もち・希望や対策系ルール】
+
+投稿7〜9は「読者が明日への一歩を踏み出せる」投稿を作成してください。
+
+- **必ず含める要素**:
+  1. 前向きな心もち・気持ちの持ち方（「こう考えると少し楽になります」「視点を変えると〜」等）
+  2. 希望のある未来像・出口のイメージ（「焦らなくていい」「今の積み重ねが必ず〜」等）
+  3. 具体的な対策・行動のヒント（1〜2点に絞り、ハードルを低く提示する）
+
+- **テーマ例**（3本で重複しないこと）:
+  - 今のしんどさが「変わりたい」というサインである気づき
+  - 小さな一歩でいい、完璧にやらなくていいという許可
+  - 副業・外の世界に目を向けることで心が楽になる話
+  - 自分を責めるのをやめると動けるようになる話
+  - 今日より明日が少しだけ良くなるための具体的な行動
+  - 今の状況を変える最初の一歩は小さくていい
+
+- **文体ルール**:
+  - 口調は「〜です」「〜ます」調で統一
+  - 押しつけにならず「こんな方法もあります」のトーン
+  - 読み終えたあと「やってみようかな」と思えるような余韻を残す
+  - 「絶対うまくいく！」などの根拠のない断言は使わない
+
+---
+
+【共通ルール（全9本に必ず守ること）】
 - 各投稿は1投稿完結・140字以内
 - 同じテーマ・同じ切り口の重複不可
 - ハッシュタグなし
@@ -177,31 +220,55 @@ def main():
 （使用した分析フック・テーマを1行で明記）
 
 （本文・140字以内）
+
+---
+## 投稿7【前向きな心もち・希望や対策】
+
+（テーマを1行で明記）
+
+（本文・140字以内）
+
+---
+## 投稿8【前向きな心もち・希望や対策】
+
+（テーマを1行で明記）
+
+（本文・140字以内）
+
+---
+## 投稿9【前向きな心もち・希望や対策】
+
+（テーマを1行で明記）
+
+（本文・140字以内）
 """
 
     client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4000,
+        max_tokens=6000,
         messages=[{"role": "user", "content": prompt}],
     )
 
     posts = message.content[0].text
     today = datetime.now().strftime("%Y-%m-%d")
-    os.makedirs("posts", exist_ok=True)
-    filename = f"posts/{today}.md"
+    posts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "posts")
+    os.makedirs(posts_dir, exist_ok=True)
+    filename = os.path.join(posts_dir, f"{today}.md")
 
-    accounts = ["@Influencer侍", "@paya_paya_kun", "@IObousan"]
+    ref_accounts = load_reference_accounts()
     ref_note = "（参考アカウント分析反映）" if insights_text else ""
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"# X投稿案 {today} {ref_note}\n\n")
+        f.write("> 投稿1〜6：通常投稿　／　投稿7〜9：前向きな心もち・希望や対策\n")
         f.write("> このファイルを確認・修正してからXに投稿してください。\n")
         if insights_text:
-            f.write(f"> 参考アカウント（{'・'.join(accounts)}）の分析を反映しています。\n")
+            f.write(f"> 参考アカウント（{'・'.join(ref_accounts)}）の分析を反映しています。\n")
         f.write("\n")
         f.write(posts)
 
     print(f"生成完了: {filename}")
+    print(f"  投稿数: 9本（通常6 + 前向き・希望・対策3）")
     if insights_text:
         print("  参考アカウント分析インサイトを反映しました")
     else:
